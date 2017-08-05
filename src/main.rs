@@ -16,9 +16,9 @@ use systemstat::{Platform, System};
 fn plugged(sys: &System) -> String {
     if let Ok(plugged) = sys.on_ac_power() {
         if plugged {
-            "🔌 ✓".to_string()
+            "🔌".to_string()
         } else {
-            "🔌 ✘".to_string()
+            "🔋".to_string()
         }
     } else {
         "🔌".to_string()
@@ -27,7 +27,7 @@ fn plugged(sys: &System) -> String {
 
 fn battery(sys: &System) -> String {
     if let Ok(bat) = sys.battery_life() {
-        format!("🔋 {:.1}%", bat.remaining_capacity * 100.)
+        format!("{} {:.1}%", plugged(sys), bat.remaining_capacity * 100.)
     } else {
         "".to_string()
     }
@@ -59,7 +59,7 @@ fn separated(s: String) -> String {
 }
 
 fn status(sys: &System) -> String {
-    separated(plugged(sys)) + &separated(battery(sys)) + &separated(ram(sys)) +
+    separated(battery(sys)) + &separated(ram(sys)) +
     &separated(cpu(sys)) + &date()
 }
 
