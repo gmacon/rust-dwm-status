@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::process::Command;
 use std::time::Duration;
 use std::thread;
@@ -13,6 +14,40 @@ extern crate systemstat;
 use chan_signal::Signal;
 use systemstat::{Platform, System};
 use systemstat::data::IpAddr::V4;
+
+fn get_mute() -> Result<bool, Box<Error>> {
+    let output = Command::new("pamixer")
+        .arg("--get-mute")
+        .output()?;
+    let mute_string = String::from_utf8(output.stdout)?;
+    return Ok(mute_string.trim() == String::from("true"));
+}
+
+fn get_volume() -> Result<i32, Box<Error>> {
+    let output = Command::new("pamixer")
+        .arg("--get-volume")
+        .output()?;
+    let volume_string = String::from_utf8(output.stdout)?;
+    return Ok(volume_string.trim().parse()?);
+}
+
+fn volume() -> String {
+    if let Ok(muted) = get_mute() {
+        if muted {
+            return "🔇".to_string()
+        }
+    }
+
+    if let Ok(volume) = get_volume() {
+        let speaker = match volume {
+            0 ... 33 => "🔈",
+            34 ... 66 => "🔉",
+            _ => "🔊",
+        };
+        return format!("{} {}", speaker, volume)
+    }
+    return "".to_string();
+}
 
 fn network(sys: &System) -> String {
     if let Ok(interfaces) = sys.networks() {
@@ -82,8 +117,12 @@ fn separated(s: String) -> String {
 }
 
 fn status(sys: &System) -> String {
-    separated(network(sys)) + &separated(battery(sys)) + &separated(ram(sys)) +
-    &separated(cpu(sys)) + &date()
+    separated(volume()) +
+        &separated(network(sys)) +
+        &separated(battery(sys)) +
+        &separated(ram(sys)) +
+        &separated(cpu(sys)) +
+        &date()
 }
 
 fn update_status(status: &String) {
