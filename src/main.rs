@@ -12,6 +12,29 @@ extern crate systemstat;
 
 use chan_signal::Signal;
 use systemstat::{Platform, System};
+use systemstat::data::IpAddr::V4;
+
+fn network(sys: &System) -> String {
+    if let Ok(interfaces) = sys.networks() {
+        if let Some(dock_info) = interfaces.get("dock0") {
+            for net in &dock_info.addrs {
+                if let V4(addr) = net.addr {
+                    return "⇅".to_string()
+                }
+            }
+        }
+        if let Some(wireless_info) = interfaces.get("wlp58s0") {
+            for net in &wireless_info.addrs {
+                if let V4(addr) = net.addr {
+                    return "📡".to_string()
+                }
+            }
+        }
+        "".to_string()
+    } else {
+        "".to_string()
+    }
+}
 
 fn plugged(sys: &System) -> String {
     if let Ok(plugged) = sys.on_ac_power() {
@@ -59,7 +82,7 @@ fn separated(s: String) -> String {
 }
 
 fn status(sys: &System) -> String {
-    separated(battery(sys)) + &separated(ram(sys)) +
+    separated(network(sys)) + &separated(battery(sys)) + &separated(ram(sys)) +
     &separated(cpu(sys)) + &date()
 }
 
