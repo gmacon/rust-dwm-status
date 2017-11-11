@@ -161,7 +161,7 @@ fn run(_sdone: chan::Sender<()>, tx_status: mpsc::Sender<String>) {
             let notification = received.unwrap();
             banner = format!("{} {}", notification.summary, notification.body);
             tx_status.send(banner.clone()).unwrap();
-            let max_timeout = 60_000; // milliseconds (1 minute)
+            let max_timeout = 10_000; // milliseconds (1 minute)
             let mut t = notification.timeout.into();
             if t > max_timeout || t < 0 {
                 t = max_timeout;
