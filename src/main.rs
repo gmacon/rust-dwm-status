@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::process::Command;
+use std::sync::mpsc;
 use std::time::Duration;
 use std::thread;
 
@@ -126,38 +127,40 @@ fn status(sys: &System) -> String {
         &date()
 }
 
-fn update_status(status: &String, xconn: &xcb::base::Connection, window: xcb::xproto::Window) {
-    xcb::xproto::change_property(xconn,
-                                 xcb::xproto::PROP_MODE_REPLACE as u8,
-                                 window,
-                                 xcb::xproto::ATOM_WM_NAME,
-                                 xcb::xproto::ATOM_STRING,
-                                 8,
-                                 status.as_bytes());
-    xconn.flush();
-}
-
-fn run(_sdone: chan::Sender<()>) {
-    use notify_rust::server::NotificationServer;
-    let mut server = NotificationServer::new();
-    let sys = System::new();
-
+fn run_update_status(chan: mpsc::Receiver<String>) {
     let (xconn, screen_num) = xcb::Connection::connect(None).unwrap();
     let setup = xconn.get_setup();
     let screen = setup.roots().nth(screen_num as usize).unwrap();
     let root_window = screen.root();
 
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-                           server.start(|notification| sender.send(notification.clone()).unwrap())
+    for status in chan.iter() {
+        xcb::xproto::change_property(&xconn,
+                                     xcb::xproto::PROP_MODE_REPLACE as u8,
+                                     root_window,
+                                     xcb::xproto::ATOM_WM_NAME,
+                                     xcb::xproto::ATOM_STRING,
+                                     8,
+                                     status.as_bytes());
+        xconn.flush();
+    }
+}
+
+fn run(_sdone: chan::Sender<()>, tx_status: mpsc::Sender<String>) {
+    use notify_rust::server::NotificationServer;
+    let mut server = NotificationServer::new();
+    let sys = System::new();
+
+    let (tx_notification, rx_notification) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+                           server.start(|notification| tx_notification.send(notification.clone()).unwrap())
                        });
     let mut banner = String::new();
     loop {
-        let received = receiver.try_recv();
+        let received = rx_notification.try_recv();
         if received.is_ok() {
             let notification = received.unwrap();
             banner = format!("{} {}", notification.summary, notification.body);
-            update_status(&banner, &xconn, root_window);
+            tx_status.send(banner.clone()).unwrap();
             let max_timeout = 60_000; // milliseconds (1 minute)
             let mut t = notification.timeout.into();
             if t > max_timeout || t < 0 {
@@ -168,7 +171,7 @@ fn run(_sdone: chan::Sender<()>) {
         let next_banner = status(&sys);
         if next_banner != banner {
             banner = next_banner;
-            update_status(&banner, &xconn, root_window);
+            tx_status.send(banner.clone()).unwrap();
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -177,18 +180,26 @@ fn run(_sdone: chan::Sender<()>) {
 fn main() {
     // Signal gets a value when the OS sent a INT or TERM signal.
     let signal = chan_signal::notify(&[Signal::INT, Signal::TERM]);
+
     // When our work is complete, send a sentinel value on `sdone`.
     let (sdone, rdone) = chan::sync(0);
+
+    // Channel to pass status updates
+    let (tx_status, rx_status) = mpsc::channel();
+
+    thread::spawn(move || run_update_status(rx_status));
+
     // Run work.
-    std::thread::spawn(move || run(sdone));
+    let main_tx_status = tx_status.clone();
+    thread::spawn(move || run(sdone, main_tx_status));
 
     // Wait for a signal or for work to be done.
     chan_select! {
         signal.recv() -> signal => {
-            // update_status(&format!("rust-dwm-status stopped with signal {:?}.", signal));
+            tx_status.send(format!("rust-dwm-status stopped with signal {:?}.", signal)).unwrap();
         },
         rdone.recv() => {
-            // update_status(&"rust-dwm-status: done.".to_string());
+            tx_status.send("rust-dwm-status: done.".to_string()).unwrap();
         }
     }
 }
