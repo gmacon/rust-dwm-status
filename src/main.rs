@@ -10,6 +10,7 @@ extern crate chan_signal;
 extern crate chrono;
 extern crate notify_rust;
 extern crate systemstat;
+extern crate xcb;
 
 use chan_signal::Signal;
 use systemstat::{Platform, System};
@@ -125,15 +126,26 @@ fn status(sys: &System) -> String {
         &date()
 }
 
-fn update_status(status: &String) {
-    // Don't panic if we fail! We'll do better next time!
-    let _ = Command::new("xsetroot").arg("-name").arg(status).output();
+fn update_status(status: &String, xconn: &xcb::base::Connection, window: xcb::xproto::Window) {
+    xcb::xproto::change_property(xconn,
+                                 xcb::xproto::PROP_MODE_REPLACE as u8,
+                                 window,
+                                 xcb::xproto::ATOM_WM_NAME,
+                                 xcb::xproto::ATOM_STRING,
+                                 8,
+                                 status.as_bytes());
+    xconn.flush();
 }
 
 fn run(_sdone: chan::Sender<()>) {
     use notify_rust::server::NotificationServer;
     let mut server = NotificationServer::new();
     let sys = System::new();
+
+    let (xconn, screen_num) = xcb::Connection::connect(None).unwrap();
+    let setup = xconn.get_setup();
+    let screen = setup.roots().nth(screen_num as usize).unwrap();
+    let root_window = screen.root();
 
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -145,7 +157,7 @@ fn run(_sdone: chan::Sender<()>) {
         if received.is_ok() {
             let notification = received.unwrap();
             banner = format!("{} {}", notification.summary, notification.body);
-            update_status(&banner);
+            update_status(&banner, &xconn, root_window);
             let max_timeout = 60_000; // milliseconds (1 minute)
             let mut t = notification.timeout.into();
             if t > max_timeout || t < 0 {
@@ -156,7 +168,7 @@ fn run(_sdone: chan::Sender<()>) {
         let next_banner = status(&sys);
         if next_banner != banner {
             banner = next_banner;
-            update_status(&banner);
+            update_status(&banner, &xconn, root_window);
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -173,10 +185,10 @@ fn main() {
     // Wait for a signal or for work to be done.
     chan_select! {
         signal.recv() -> signal => {
-            update_status(&format!("rust-dwm-status stopped with signal {:?}.", signal));
+            // update_status(&format!("rust-dwm-status stopped with signal {:?}.", signal));
         },
         rdone.recv() => {
-            update_status(&"rust-dwm-status: done.".to_string());
+            // update_status(&"rust-dwm-status: done.".to_string());
         }
     }
 }
