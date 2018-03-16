@@ -17,6 +17,24 @@ use chan_signal::Signal;
 use systemstat::{Platform, System};
 use systemstat::data::IpAddr::V4;
 
+fn get_mail() -> Result<i32, Box<Error>> {
+    let output = Command::new("notmuch")
+        .arg("count")
+        .arg("tag:inbox")
+        .output()?;
+    let inbox_count_string = String::from_utf8(output.stdout)?;
+    return Ok(inbox_count_string.trim().parse()?);
+}
+
+fn mail() -> String {
+    if let Ok(inbox_count) = get_mail() {
+        if inbox_count > 0 {
+            return format!("📧 {}", inbox_count);
+        }
+    }
+    return "".to_string();
+}
+
 fn get_mute() -> Result<bool, Box<Error>> {
     let output = Command::new("pamixer")
         .arg("--get-mute")
@@ -119,7 +137,8 @@ fn separated(s: String) -> String {
 }
 
 fn status(sys: &System) -> String {
-    separated(volume()) +
+    separated(mail()) +
+        &separated(volume()) +
         &separated(network(sys)) +
         &separated(battery(sys)) +
         &separated(ram(sys)) +
